@@ -44,6 +44,24 @@ const verifyUser = (req, res, next) => {
         next();
     });
 };
+app.get("/verify-token", (req, res) => {
+  const token = req.cookies.token;
+  if (!token) {
+    return res.status(401).json({ message: "No token available" });
+  }
+  
+  jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
+    if (err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+    
+    return res.status(200).json({ 
+      message: "Token valid", 
+      role: decoded.role,
+      email: decoded.email 
+    });
+  });
+});
 
 app.post("/signup", (req, res) => {
     const { name, email, password } = req.body;
