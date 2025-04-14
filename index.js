@@ -55,7 +55,24 @@ app.post("/signup", (req, res) => {
         })
         .catch(err => res.json(err))
 })
-
+ app.get("/verify-token", (req, res) => {
+  const token = req.cookies.token;
+  if (!token) {
+    return res.status(401).json({ message: "No token available" });
+  }
+  
+  jwt.verify(token, "jwt-secret-key", (err, decoded) => {
+    if (err) {
+      return res.status(401).json({ message: "Invalid token" });
+    }
+    
+    return res.status(200).json({ 
+      message: "Token valid", 
+      role: decoded.role,
+      email: decoded.email 
+    });
+  });
+});
 
 app.post("/login", (req, res) => {
     const { email, password } = req.body;
