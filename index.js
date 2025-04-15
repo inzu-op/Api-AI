@@ -44,6 +44,17 @@ const verifyUser = (req, res, next) => {
         next();
     });
 };
+
+app.post("/signup", (req, res) => {
+    const { name, email, password } = req.body;
+    bcrypt.hash(password, 10)
+        .then(hash => {
+            AdminModel.create({ name, email, password: hash })
+                .then(users => res.json("success"))
+                .catch(err => res.json(err))
+        })
+        .catch(err => res.json(err))
+})
 app.get("/verify-token", (req, res) => {
   const token = req.cookies.token;
   if (!token) {
@@ -63,16 +74,6 @@ app.get("/verify-token", (req, res) => {
   });
 });
 
-app.post("/signup", (req, res) => {
-    const { name, email, password } = req.body;
-    bcrypt.hash(password, 10)
-        .then(hash => {
-            AdminModel.create({ name, email, password: hash })
-                .then(users => res.json("success"))
-                .catch(err => res.json(err))
-        })
-        .catch(err => res.json(err))
-})
 
 
 app.post("/login", (req, res) => {
