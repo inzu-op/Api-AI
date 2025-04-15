@@ -21,7 +21,7 @@ app.use(cors({
 
 axios.defaults.withCredentials = true;
 
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 const jwtSecretKey = process.env.JWT_SECRET_KEY;
 const mongoDBUri = process.env.MONGODB_URI;
@@ -33,11 +33,15 @@ mongoose.connect(mongoDBUri)
 
 const verifyUser = (req, res, next) => {
     const token = req.cookies.token;
+    console.log("Received token:", token); // Debug logging
+    
     if (!token) {
-        return res.status(404).json({ error: "No token available" });
+        return res.status(401).json({ error: "No token available" });
     }
-    jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
+    
+    jwt.verify(token, jwtSecretKey, (err, decoded) => {
         if (err) {
+            console.log("Token verification error:", err); // Debug logging
             return res.status(401).json({ error: "Invalid token" });
         }
         req.user = decoded;
@@ -54,15 +58,19 @@ app.post("/signup", (req, res) => {
                 .catch(err => res.json(err))
         })
         .catch(err => res.json(err))
-})
+});
+
 app.get("/verify-token", (req, res) => {
   const token = req.cookies.token;
+  console.log("Verify token endpoint - token:", token); // Debug logging
+  
   if (!token) {
     return res.status(401).json({ message: "No token available" });
   }
   
-  jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
+  jwt.verify(token, jwtSecretKey, (err, decoded) => {
     if (err) {
+      console.log("Token verification error:", err); // Debug logging
       return res.status(401).json({ message: "Invalid token" });
     }
     
@@ -74,8 +82,6 @@ app.get("/verify-token", (req, res) => {
   });
 });
 
-
-
 app.post("/login", (req, res) => {
     const { email, password } = req.body;
     try {
@@ -84,8 +90,21 @@ app.post("/login", (req, res) => {
                 if (user) {
                     bcrypt.compare(password, user.password, (err, result) => {
                         if (result) {
-                            const token = jwt.sign({ email: user.email, role: user.role }, process.env.JWT_SECRET_KEY, { expiresIn: "1d" });
-                            res.cookie("token", token, { httpOnly: true, secure: false });
+                            const token = jwt.sign(
+                                { email: user.email, role: user.role }, 
+                                jwtSecretKey, 
+                                { expiresIn: "1d" }
+                            );
+                            
+                            // Updated cookie settings for cross-origin requests
+                            res.cookie("token", token, { 
+                                httpOnly: true, 
+                                secure: true,  // Required for cross-origin with sameSite=none
+                                sameSite: 'none',  // Allow cross-site cookies
+                                maxAge: 24 * 60 * 60 * 1000  // 1 day in milliseconds
+                            });
+                            
+                            console.log("Login successful, token created for:", user.email);
                             res.json({ Status: "success", role: user.role });
                         } else {
                             res.status(401).json("incorrect password");
@@ -95,9 +114,38 @@ app.post("/login", (req, res) => {
                     res.status(404).json("no user found");
                 }
             })
-            .catch(err => res.status(500).json(err));
+            .catch(err => {
+                console.error("Login error:", err);
+                res.status(500).json(err);
+            });
     } catch (err) {
+        console.error("Login exception:", err);
         res.status(500).json(err);
+    }
+});
+
+app.get("/userdata/user", verifyUser, async (req, res) => {
+    try {
+        const user = await AdminModel.findOne({ email: req.user.email }).select('_id name email');
+        
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        
+        res.json({
+            success: true,
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email
+            }
+        });
+    } catch (error) {
+        console.error("User data fetch error:", error);
+        res.status(500).json({ 
+            success: false,
+            message: "Error fetching user data" 
+        });
     }
 });
 
@@ -125,8 +173,9 @@ app.get("/userdata/email/:email", async (req, res) => {
         message: "Error fetching user data" 
       });
     }
-  });
-  app.get("/userdata/:id", async (req, res) => {
+});
+
+app.get("/userdata/:id", async (req, res) => {
     try {
       const userId = req.params.id;
       const user = await AdminModel.findById(userId).select('name email');
@@ -149,11 +198,11 @@ app.get("/userdata/email/:email", async (req, res) => {
         message: "Error fetching user data" 
       });
     }
-  });
+});
 
 app.get("/chat", verifyUser, (req, res) => {
-    res.send("hello")
-})
+    res.json({ message: "Authentication successful" });
+});
 
 app.post('/chatbot', verifyUser, async (req, res) => {
     try {
@@ -162,9 +211,7 @@ app.post('/chatbot', verifyUser, async (req, res) => {
             return res.status(400).json({ error: "Input text cannot be empty" });
         }
 
-        const token = req.cookies.token;
-        const decoded = jwt.verify(token, jwtSecretKey);
-        const adminEmail = decoded.email;
+        const adminEmail = req.user.email;
 
         const admin = await AdminModel.findOne({ email: adminEmail }).populate('conversations');
         
@@ -267,7 +314,6 @@ app.post('/chatbot', verifyUser, async (req, res) => {
 });
 
 function categorizeQuery(query) {
-
     const healthKeywords = ['health', 'fitness', 'diet', 'exercise', 'nutrition', 'medical', 
                            'mental health', 'anxiety', 'depression', 'sleep', 'doctor'];
                            
@@ -283,7 +329,6 @@ function categorizeQuery(query) {
 }
 
 function estimateResponseLength(query) {
-
     const words = query.split(/\s+/).length;
     
     if (words < 10) return "brief";
@@ -315,30 +360,25 @@ function formatResponse(text, domain, length) {
 
 app.get('/conversations', verifyUser, async (req, res) => {
     try {
-        const token = req.cookies.token;
-        const decoded = jwt.verify(token,jwtSecretKey);
-        const admin = await AdminModel.findOne({ email: decoded.email })
+        const admin = await AdminModel.findOne({ email: req.user.email })
             .populate('conversations');
         res.json(admin.conversations);
     } catch (error) {
+        console.error("Error fetching conversations:", error);
         res.status(500).json({ error: 'Error fetching conversations' });
     }
 });
-
 
 app.delete('/conversation/:id', verifyUser, async (req, res) => {
     try {
         const { id } = req.params;
 
-  
         const conversation = await ConversationModel.findById(id);
         if (!conversation) {
             return res.status(404).json({ message: 'Conversation not found' });
         }
 
-       
         await ConversationModel.findByIdAndDelete(id);
-
         
         await AdminModel.updateOne(
             { email: req.user.email },
@@ -351,12 +391,10 @@ app.delete('/conversation/:id', verifyUser, async (req, res) => {
         res.status(500).json({ message: 'Failed to delete conversation' });
     }
 });
+
 app.delete('/conversations/all', verifyUser, async (req, res) => {
     try {
-        const token = req.cookies.token;
-        const decoded = jwt.verify(token, jwtSecretKey);
-        
-        const admin = await AdminModel.findOne({ email: decoded.email });
+        const admin = await AdminModel.findOne({ email: req.user.email });
         if (!admin) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -372,10 +410,16 @@ app.delete('/conversations/all', verifyUser, async (req, res) => {
         res.status(500).json({ message: 'Failed to delete all conversations' });
     }
 });
-app.get("/logout",(req,res)=>{
-    res.clearCookie("token")
-    return res.json({Status:"success"})
-})
+
+app.get("/logout", (req, res) => {
+    // Clear the cookie with the same settings that were used to create it
+    res.clearCookie("token", { 
+        httpOnly: true,
+        secure: true,
+        sameSite: 'none'
+    });
+    return res.json({Status: "success"});
+});
 
 app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
